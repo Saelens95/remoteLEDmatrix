@@ -1,0 +1,165 @@
+//Simple LED Matrix Display with Blynk and Weather Integration 
+//Uses 4x MAX7219 Dot Matrix Modules to display messages
+//Make sure you add these two libraries using the Particle IDE
+
+//This #include statement was automatically added by the Particle IDE.
+#include <blynk.h>
+
+//This #include statement was automatically added by the Particle IDE.
+#include <ledmatrix-max7219-max7221.h>
+
+//This #include statement was automatically added by the Particle IDE.
+#include <blynk.h>
+
+//This #include statement was automatically added by the Particle IDE.
+#include <ledmatrix-max7219-max7221.h>
+
+
+char auth[] = "###############"; // Put your blynk token here
+
+LEDMatrix *led;
+
+int bitmapWidth = 8;   //8 is default
+int webCount = 900000;   //Timer to run the weather webhook every 15 minutes
+
+String strDefault = "Hello World";   //Default string for display
+String strText = "Hello RVCIOT Class";  //Default string for Blynk texts
+String strWeather = ""; //Default string for weather
+String tb = "    ";//Tab space for LED
+
+
+int mode = 0;
+int sleepTime = 60;
+int textLength = strDefault.length();
+
+//Default position of the text is outside and then scrolls left
+int textX = bitmapWidth;
+int fontWidth = 5, space = 1;
+
+void drawText(String s, int x){
+  int y = 0;
+  for(int i = 0; i < s.length(); i++) {
+      
+    //Adafruit_GFX method
+    led->drawChar(x + i*(fontWidth+space), y, s[i], true, false, 1);
+  }
+}
+
+
+
+
+void setup() {
+  Blynk.begin(auth);   //Setup Blynk 
+  //Setup pins and library
+  //1 display per row, 1 display per column
+  //Optional pin settings - default: CLK = A0, CS = A1, D_OUT = A2
+  //(pin settings is independent on HW SPI)
+  //led->setIntensity(0,8);
+  led = new LEDMatrix(4, 1, D1, D2, D3); // my pins vary from the default
+  // > add every matrix in the order in which they have been connected <
+  //The first matrix in a row, the first matrix in a column
+  //Vertical orientation (-90°) and no mirroring - last three args optional
+  //The Wangdd22 Matrix has 4 matrix elements, arranged side-by-side
+  led->addMatrix(3, 0, 0, false, false);
+  led->addMatrix(2, 0, 0, false, false);
+  led->addMatrix(1, 0, 0, false, false);
+  led->addMatrix(0, 0, 0, false, false);
+  
+  Particle.subscribe("hook-response/temp", gotWeatherData, MY_DEVICES);   //See particle.io tutorial on weather webhooks
+   //This essentially starts the I2C bus
+}
+
+BLYNK_CONNECTED() {
+    Blynk.syncAll();
+}
+
+//In the Blynk app, I used the Termianl widget on virtual pin V1 to send text messages for display.  
+BLYNK_WRITE(V3){
+    int Power = param.asInt();
+      if (Power == 3) {
+           led->shutdown(true);
+    //Free memory
+    delete led;
+    led = NULL;
+         mode = 2;
+      }
+}
+
+BLYNK_WRITE(V1) {
+   String cmd = param[0].asStr();
+   strText = cmd;
+   Particle.publish("Message",strText,PRIVATE); 
+}
+
+//In the Blynk app, I used V2 as a button to toggle mode between weather and texts.
+BLYNK_WRITE(V2){
+    mode = param.asInt();
+    if (mode == 0){
+         Particle.publish("temp"); 
+    }
+}
+
+//This collects data from my get_weather webhook, AccuWeather data in my example.  
+//See the photon tutorial on webhooks to get other data.  
+// https://docs.particle.io/tutorials/integrations/webhooks/
+
+void gotWeatherData(const char *name, const char *data) {
+    strWeather = String(data);
+      Particle.publish("Weather",strWeather,PRIVATE); 
+}
+
+void loop() {
+    Blynk.run();   
+
+    if (webCount > 900000) {    //Fetch data via the webhook every 15 (900000) minutes
+        Particle.publish("temp"); 
+        webCount = 0;
+    }
+
+//Pick which text string will be displayed
+
+    if (mode == 0) {
+        strDefault = strWeather;
+        strDefault = tb + strDefault;
+        textLength = strDefault.length();
+    }    
+    
+    if (mode == 1) {
+        strDefault = strText;
+        strDefault = tb + strDefault;
+        textLength = strDefault.length();
+    }
+    if (mode == 2) {
+    //Here it does not work
+      System.sleep(SLEEP_MODE_DEEP, sleepTime);
+    }
+    
+    
+    webCount = webCount + 1;
+    
+  if(led != NULL) {
+    drawText(strDefault, textX--);
+    //Text animation is ending when the whole text is outside the bitmap
+    if(textX < textLength*(fontWidth+space)*(-1)) {
+      //Set default text position
+      textX = bitmapWidth;
+      //Show heart
+      led->flush();
+      delay(800);   // 1000 is default
+      //Turn all pixels off
+      led->fillScreen(false);
+    }
+    //Draw text
+    led->flush();
+    delay(5);   //125 is default 
+  }
+  //Animations end
+  else if (led != NULL) {
+    //Shutdown all displays
+    led->shutdown(true);
+    //Free memory
+    delete led;
+    led = NULL;
+  }
+
+}
